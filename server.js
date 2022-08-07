@@ -1,6 +1,8 @@
 const express = require('express')
 const redis = require('redis')
 const dotenv = require('dotenv')
+const {v4:uuid} = require('uuid')
+const {NotFound} = require('http-errors')
 
 dotenv.config()
 const app = express()
@@ -19,44 +21,62 @@ redisConn()
 
 app.use(express.json())
 
-app.post('/',async (req,res)=>{
+app.post('/',async (req,res,next)=>{
     try{
-        const record = await redisClient.get('body')
-        if(record){
-            throw new Error('This Key already has a value')
+        const key = uuid()
+        await redisClient.set(key,JSON.stringify(req.body),{EX:3600})
+        res.json({Save:true})
+    }catch(err){
+        next(err)
+    }
+})
+
+app.get('/',async (req,res,next)=>{
+    try{
+        const data = await redisClient.keys('*')
+        const allKeys = []
+        for(let i=0;i<data.length;i++){
+            allKeys.push({
+                Key: data[i],
+                Value: JSON.parse(await redisClient.get(data[i]))
+            })
         }
-        const data = await redisClient.set('body',JSON.stringify(req.body),{EX:120,NX:true})
-        res.json(JSON.parse(data))
+        res.json({AllKeys: allKeys})
     }catch(err){
-        console.error(err.message)
+        next(err)
     }
 })
 
-app.get('/',async (req,res)=>{
+app.get('/:key',async (req,res,next)=>{
     try{
-        const data = await redisClient.get('body')
-        res.json(JSON.parse(data))
+        const data = await redisClient.get(req.params.key)
+        if(!data) throw NotFound('This keys doesn\'t exist')
+        res.json({Key: req.params.key,Value: JSON.parse(data)})
     }catch(err){
-        console.error(err.message)
+        next(err)
     }
 })
 
-app.patch('/',async (req,res)=>{
+app.patch('/:key',async (req,res,next)=>{
     try{
-        await redisClient.set('body',JSON.stringify(req.body),{EX:120,XX:true})
-        res.json({Completed:true})
+        const data = await redisClient.get(req.params.key)
+        if(!data) throw NotFound('This Key doesn\'t exist')
+        await redisClient.set(req.params.key,JSON.stringify(req.body),{EX:3600})
+        res.json({Updated:true})
     }catch(err){
-        console.error(err.message)
+        next(err)
     }
 
 })
 
-app.delete('/',async (req,res)=>{
+app.delete('/:key',async (req,res,next)=>{
     try{
-        const data = await redisClient.del('body')
-        res.json(data)
+        const data = await redisClient.get(req.params.key)
+        if(!data) throw NotFound('This Key doesn\'t exist')
+        await redisClient.del(req.params.key)
+        res.json({Deleted: true})
     }catch(err){
-        console.error(err.message)
+        next(err)
     }
 })
 
